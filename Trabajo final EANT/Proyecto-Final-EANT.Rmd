@@ -1,0 +1,647 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+```{r}
+library(shiny)
+library(tidyverse)
+library(readxl)
+library(ggplot2)
+library(plotly)
+library(shinythemes)
+library(shinyWidgets)
+library(leaflet)
+library(htmltools)
+library(sf)
+library(rsconnect)
+
+```
+
+
+```{r}
+ui=fluidPage(
+             setBackgroundColor(color='white'),
+             tags$style( 
+                      '.nav-tabs { border-color: #31408C;tabs-color:#31408C}',
+                      '.nav-tabs-custom .nav-tabs li.active {
+             border-top-color: #4176A3;}'
+),
+  h1(img(src='https://encrypted-tbn0.gstatic.com/images?q=tbn%3AANd9GcSXrLroJ5kCwXq5MADOkTatSakCYUAF42fSFw&usqp=CAU',
+         width=450,height=150)), 
+  h5(strong(em('¿Las condiciones iniciales de las comunas son relevantes para explicar los contagios?'),style='color:#31408C')), #CABECERA
+  tabsetPanel(tabPanel('Introducción',
+                       column(1),
+                       column(9,
+                              br(),
+                              h4(strong('¿Qué nos proponemos con este proyecto?'),style='color:#31408C'),
+                              p('En el marco del desafío final del programa de', em(strong('Data Analytics de la ',a(href='https://eant.tech/home','EANT'))), ', nos proponemos establecer condiciones iniciales para cada comuna en el marco de la pandemia de COVID-19 y analizar qué relación guardan las mismas con los casos positivos.'),
+                              p('Para esto, analizaremos distintas variables relevantes en la contención de la actual crisis sanitaria:'),
+                              tags$div(tags$ul(
+                                tags$li('Sistema de salud público y privado'),
+                                tags$li('Condiciones de vivienda y hacinamiento'),
+                                tags$li('Calidad del trabajo, teletrabajo y empleo no registrado'),
+                                tags$li('Disponibilidad de comercios de cercanía') 
+                              ),
+                              p('Todas estas variables serán analizadas por comuna y contrastadas con la cantidad de contagios registrados.'),
+                              p('Al finalizar este análisis, se intentará responder si un mejor o peor desempeño en estos factores se correlaciona con la cantidad de contagios, y qué comunas son más vulnerables.'))),
+                       column(1)), #HASTA ACÁ INTRODUCCIÓN 
+              tabPanel('Estado de situación',
+                       navlistPanel(
+                         tabPanel('Distribución de los casos',
+                                  br(),
+                                  fluidRow(
+                                  column(3,
+                                         selectInput(inputId = 'barrio',
+                                               label = 'Consulte qué barrios hay en cada comuna:',
+                                               choices = sort(unique(df_COVID$COMUNA)),
+                                               selected = 'COMUNA 01'),
+                                         tableOutput(outputId = 'tablacomu')
+                                         ),
+                                  column(8,
+                                  plotlyOutput(outputId = 'casos1'))),
+                                  br(),
+                                  p(em('*Datos extraídos del Boletín Epidemiológico Semanal de la CABA al 31/07/20'))
+                                  ),
+                         tabPanel('Casos cada 100.000 habitantes',
+                                  br(),
+                                  plotlyOutput(outputId = 'casos100'),
+                                  br(),
+                                  p(em('*Datos extraídos del Boletín Epidemiológico Semanal de la CABA al 31/07/20'))),
+                         tabPanel('Evolución de los casos, altas y fallecimientos diarios',
+                                  br(),
+                                  plotlyOutput(outputId = 'casos2'),
+                                  br(),
+                                  p(em('*Datos extraídos de los datos abiertos del GCBA al 31/07/20'))),
+                         tabPanel('Evolución de los casos diarios por comuna',
+                                  br(),
+                                  plotlyOutput(outputId = 'casos2.1'),
+                                  br(),
+                                  p(strong(em('NOTA: Haga doble click sobre alguna de las comunas para ver la evolución de los casos individualmente'))),
+                                  br(),
+                                  p(em('*Datos extraídos de los datos abiertos del GCBA al 31/07/20'))),
+                         tabPanel('Evolución de los casos por barrio',
+                                  br(),
+                                  selectInput(inputId = 'comuna',
+                                              label = 'Seleccione la/s comuna/s que desea ver:',
+                                              choices = sort(unique(df_COVID$COMUNA)),
+                                              selected = 'COMUNA 01',
+                                              multiple = TRUE),
+                                  plotlyOutput(outputId = 'casos3'),
+                                  br(),
+                                  p(strong(em('NOTA: Recomendamos no seleccionar más de cuatro o cinco comunas, para una mejor visualización de los resultados'))),
+                                  br(),
+                                  p(em('*Datos extraídos del Boletín Epidemiológico Semanal de la CABA al 31/07/20'))
+                       ),
+                       tabPanel('Tipos de contagios registrados',
+                                br(),
+                                selectInput(inputId = 'comuna0',
+                                            label = 'Elija la comuna a visualizar:',
+                                            choices = sort(unique(df_COVID$COMUNA))),
+                                br(),
+                                plotOutput(outputId = 'tipoconta'),
+                                br(),
+                                p(em('*Datos extraídos de los datos abiertos del GCBA al 31/07/20'))),
+                       tabPanel('Fallecimientos por rango etareo',
+                                br(),
+                                selectInput(inputId = 'comufalle',
+                                              label = 'Seleccione la comuna que desea ver:',
+                                              choices = sort(unique(df_COVID$COMUNA)),
+                                              selected = 'COMUNA 01'),
+                                plotlyOutput(outputId = 'comunafalle'),
+                                br(),
+                                p(em('*Datos extraídos de los datos abiertos del GCBA al 31/07/20'))
+                                ),
+                       tabPanel('Metodología',
+                                  br(),
+                                  p('Para analizar el estado de situación se utilizaron datos extraidos de los ',a(href='https://www.buenosaires.gob.ar/coronavirus/datos/situacion-epidemiologica','datos abiertos del GCBA'),' y del ',a(href='https://www.buenosaires.gob.ar/salud/boletines-periodicos/boletines-epidemiologicos-semanales-2018-2019','Boletín epidemiológico de la Ciudad de Buenos Aires')), #LINK A LA PAGINA DONDE ESTAN LOS INFORMES
+                                  p('Las semanas epidemiológicas relevadas son:'),
+                                  tags$div(tags$ul(
+                                    tags$li('SEMANA 14: 17 de abril'),
+                                    tags$li('SEMANA 15: 24 de abril'),
+                                    tags$li('SEMANA 16: 1 de mayo'),
+                                    tags$li('SEMANA 17: 8 de mayo'),
+                                    tags$li('SEMANA 18: 15 de mayo'),
+                                    tags$li('SEMANA 19: 22 de mayo'),
+                                    tags$li('SEMANA 20: 29 de mayo'),
+                                    tags$li('SEMANA 21: 5 de junio'),
+                                    tags$li('SEMANA 22: 12 de junio'),
+                                    tags$li('SEMANA 23: 19 de junio'),
+                                    tags$li('SEMANA 24: 26 de junio'),
+                                    tags$li('SEMANA 25: 3 de julio'),
+                                    tags$li('SEMANA 26: 10 de julio'),
+                                    tags$li('SEMANA 27: 17 de julio'),
+                                    tags$li('SEMANA 28: 24 de julio'),
+                                    tags$li('SEMANA 29: 31 de julio')))))), 
+              tabPanel('Mapas',
+                       fluidRow(column(3,
+                                       br(),
+                                       selectInput(inputId = 'rank',
+                                                   label = 'Seleccione la variable a evaluar',
+                                                   choices = names(puntajes)[15:19]),
+                                       br(),
+                                       h4('Descripción de la variable:',style='color:#31408C'),
+                                       br(),
+                                       textOutput(outputId = 'texto'),
+                                       br(),
+                                       h4('Las seis comunas con peores resultados son:',style='color:#31408C'),
+                                       br(),
+                                       fluidRow(column(2),
+                                                column(8,
+                                                       tableOutput(outputId = 'tabla_rank')),
+                                                column(2))),
+                                column(8,
+                                       br(),
+                                       br(),
+                                       br(),
+                                       br(),
+                                leafletOutput(outputId = 'mapas', width = "100%", height = 400)))),
+              
+              tabPanel('Tabla de puntajes',
+                       br(),
+                       dataTableOutput(outputId = 'puntajes')),
+
+              
+              tabPanel('Conclusiones',
+                       br(),
+                       fluidRow(column(1),
+                                column(10,
+                                       h4('En base a lo analizado, concluimos:'),
+                                      p('El conjunto de variables elegidas es relevante para explicar la dinámica de los contagios por COVID-19 en las diferentes comunas de la Ciudad.'),
+                                      p('En particular, encontramos que al sur de la ciudad, donde las comunas registraron los peores puntajes, se da la mayor tasa de casos positivos cada 100.000 habitantes.'),
+                                      p('También se ve que las condiciones iniciales del oeste de la ciudad no son muy distintas a las del sur, aunque sí se observa una diferencia significativa en los casos cada 100.000 habitantes. Esto puede guardar relación con que la mayoría de las comunas con mas casos (1,4,7 y 9) tienen en su territorio barrios populares, en los que el GCBA realizó rastreos de casos temprano a través del Plan Detectar.'),
+                                      p('Adicionalmente, podemos decir que nuestros indicadores de Salud, Vivienda y Empleo son los más relevantes para explicar la situación epidemiológica de cada comuna.')),
+                       column(1)),
+                       hr(),
+                       br(),
+                       fluidRow(column(6,
+                                       leafletOutput(outputId = 'mapacon1',width = "100%", height = 400),
+                                       br(),
+                                       tableOutput(outputId = 'tablacon1')),
+                                column(6,
+                                       leafletOutput(outputId = 'mapacon2',width = "100%", height = 400),
+                                       br(),
+                                       tableOutput(outputId = 'tablacon2')))),
+
+              
+              tabPanel('Nosotros',
+                       column(1),
+                       column(10,
+                       br(),
+                       h3(strong('El equipo'),style='color:#31408C'),
+                       br(),
+                       h5('Alan Politis - Licenciado en Economía (UNLaM) - ',
+                          a(href='https://www.linkedin.com/in/alanpolitis/','LinkedIn'),
+                          ' - ',
+                          a(href='https://www.github.com/alanpolitis','GitHub')),
+                       h5('Ignacio Ruiz - Licenciado en Economía (UBA) - ',
+                          a(href='https://www.linkedin.com/in/ignacio-ruiz-17314968','LinkedIn'),
+                          ' - ',
+                          a(href='https://www.github.com/ruizignacioo','GitHub')),
+                       h5('Valeria Fernández - Licenciada en Economía (UNLaM) - ',
+                          a(href='https://www.linkedin.com/in/valeria-sofía-fernández/','LinkedIn'),
+                          ' - ',
+                          a(href='https://www.github.com/valesfer','GitHub')),
+                       hr(),
+                       br(),
+                       h3(strong('Los profesores'),style='color:#31408C'),
+                       br(),
+                       h5('Romina Méndez'),
+                       h5('Julio Spairani'),
+                       br(),
+                       hr(),
+                       br(),
+                       h3(strong('La escuela'),style='color:#31408C'),
+                       br(),
+                       h4('EANT - Escuela Argentina de Nuevas Tecnologías'),
+                       h5('Escuela de ',a(href='https://eant.tech/escuela-de-ciencias-de-datos','Ciencia de Datos')),
+                       br(),
+                       hr(),
+                       br(),
+                       h3(strong('El proyecto'),style='color:#31408C'),
+                       br(),
+                       h5('Este proyecto fue llevado a cabo en el marco del desafío final del ',
+                          a(href='https://eant.tech/escuela-de-ciencias-de-datos/programas/data-analytics','Programa de Data Analytics'),
+                          'realizado entre el 05 de Mayo y el 21 de julio del 2020.'),
+                       h5('En medio de la pandemia mundial del COVID-19, nos pareció interesante abordar este tema para descubrir qué factores fueron determinantes de la cantidad de contagios en la Ciudad de Buenos Aires.'),
+                       h5('Para esto, utilizamos diversas bases de datos, obtenidas de:'),
+                       h5(tags$div(tags$ul(
+                                    tags$li(a(href='https://data.buenosaires.gob.ar/dataset','Datos Abiertos de la Ciudad de Buenos Aires')),
+                                    br(),
+                                    tags$li(a (href=                                               'https://www.buenosaires.gob.ar/salud/boletines-periodicos/boletines-epidemiologicos-semanales-2018-2019',
+                                  'Boletín Epidemiológico de la Ciudad de Buenos Aires')),
+                                  br(),
+                                    tags$li(a     (href='https://www.indec.gob.ar/indec/web/Institucional-Indec-BasesDeDatos-1',
+                                                   'Encuesta Permanente de Hogares (Nacional - INDEC)')),
+                                  br(),
+                                  tags$li(a(href=' https://www.estadisticaciudad.gob.ar/eyc/?page_id=702','Encuesta Anual de Hogares (CABA)'))
+                                  ))),
+                       h5('Desarrollamos el análisis utilizando Rstudio, con los siguientes paquetes:'),
+                       h5(tags$div(tags$ul(
+                                    tags$li('tidyverse'),
+                                    br(),
+                                    tags$li('shiny'),
+                                    br(),
+                                    tags$li('htmltools'),
+                                    br(),
+                                    tags$li('ggplot2'),
+                                    br(),
+                                    tags$li('plotly'),
+                                    br(),
+                                    tags$li('leaflet')
+                                    ))),
+                       br(),
+                       br()
+                       
+                                         
+                       ),
+                       column(1))))
+
+
+
+
+
+
+
+
+
+
+server=function(input,output){
+  
+  #GRAFICOS
+  
+  #TABLAS
+  
+  output$tablacomu=renderTable({
+  df_COVID %>% 
+      filter(SEMANA==max(df_COVID$SEMANA)) %>%
+      filter(COMUNA==input$barrio) %>% 
+      select(BARRIO,CASOS) %>% 
+      arrange(desc(CASOS))
+      
+  })
+  
+#GRAFICO DE DONA CON DISTRIBUCION DE CASOS ABSOLUTOS X COMUNA  
+  
+  output$casos1=renderPlotly({
+    df_COVID %>% 
+      filter(SEMANA==max(df_COVID$SEMANA))%>% 
+      select(COMUNA,CASOS) %>% 
+      group_by(COMUNA) %>% 
+      summarise(CASOS=sum(CASOS)) %>%
+      plot_ly(
+        values=~CASOS,
+        labels =~COMUNA,
+        text=~paste(CASOS, 'casos'),
+        textinfo='label+percent',
+        insidetextfont=list(color='white'),
+        hoverinfo='text',
+        type='pie',
+        hole=0.5,
+        showlegend=FALSE
+        ) %>% 
+  layout(title=list(text='Casos totales al 31-07-20',
+                    font=list(color='black',size=16))
+         )
+    
+  })
+  
+#GRAFICO DE BARRAS CON COMPARACION DE CASOS ABSOLUTOS Y CASOS CADA 100.000 HABITANTES  
+  
+  output$casos100=renderPlotly({
+   plot_ly() %>% 
+      add_trace(data=CASOS100,
+            x=~COMUNA,
+            y=~CASOS,
+            name='Casos absolutos',
+            mode='bar') %>%
+      add_trace(data=CASOS100,
+            x=~COMUNA,
+            name='Casos cada 100K hab',
+            y=~casos100,
+            mode='bar') %>% 
+      layout(title='Comparación de casos absolutos y casos cada 100.000 habitantes',
+             xaxis=list(title=''))
+ 
+  })
+  
+#TIPO DE CONTAGIO 
+  
+  output$tipoconta=renderPlot({
+    ggplot(data=df_CABA %>% 
+           filter(provincia=='CABA',
+                  tipo_contagio != 'NA',
+                  comuna==input$comuna0) %>%
+           mutate(mes=substring(fecha_apertura_snvs,6,7)) %>%
+           count(mes,tipo_contagio) %>% 
+             mutate(cantidad_casos=n),
+           aes(x=tipo_contagio,y=cantidad_casos, fill=tipo_contagio))+
+      geom_col(color='black',show.legend = FALSE)+
+      theme_bw()+
+      theme(plot.title = element_text(hjust = 0.5,size = 20),
+            axis.text = element_text(size = 14))+
+      facet_grid(mes~.)+
+      coord_flip()+
+      labs(title='Tipos de contagio por comuna por mes',
+           x='',
+           y='')
+  })
+  
+#GRAFICO DE EVOLUCIÓN DE CASOS DIARIOS, TOTAL CABA Y OTRO DE PUNTOS X COMUNA
+  
+  output$casos2=renderPlotly({
+    plot_ly() %>%
+  add_trace(data=df_CABA %>%
+                filter(provincia=='CABA',
+                clasificacion=='confirmado',
+                fecha_apertura_snvs<as.Date('2020-07-30')) %>%
+         count(fecha_apertura_snvs),
+        x=~fecha_apertura_snvs,
+        y=~n,
+        xaxis='',
+            mode=~'bar',
+        name='Contagios') %>%
+  add_trace(data=df_CABA %>%
+              filter(provincia=='CABA',
+                     clasificacion=='confirmado',
+                     fecha_alta_medica<as.Date('2020-07-30')) %>%
+              count(fecha_alta_medica),
+              x=~fecha_alta_medica,
+              y=~n,
+              xaxis='',
+            mode=~'bar',
+            name='Altas') %>%
+  add_trace(data=df_CABA %>%
+              filter(provincia=='CABA',
+                     clasificacion=='confirmado',
+                     fecha_fallecimiento<as.Date('2020-07-30')) %>%
+              count(fecha_fallecimiento),
+              x=~fecha_fallecimiento,
+              y=~n,
+              xaxis='',
+            mode=~'bar',
+            name='Fallecidos')%>%
+  layout(title='Contagios, altas y fallecimientos diarios totales en la Ciudad de Buenos Aires',
+         xaxis=list(title='Fecha'),
+         yaxis=list(title='Cantidad de contagios, altas y fallecimientos'))
+  })
+  
+  output$casos2.1=renderPlotly({
+    plot_ly(data=df_CABA %>% 
+         filter(provincia=='CABA',
+                clasificacion=='confirmado',
+                comuna!='COMUNA NA') %>% 
+         count(fecha_apertura_snvs,comuna) %>% 
+         mutate(comuna=as.factor(comuna)),
+        x=~fecha_apertura_snvs,
+        y=~n,
+        color=~comuna,
+        text=~comuna,
+        type = 'scatter',
+        xaxis='') %>% 
+  layout(title='Casos diarios de COVID por comuna',
+         yaxis=list(title='Cantidad de contagios'),
+         xaxis=list(title='Fecha'))
+
+  })
+  
+#PLOTLY INTERACTIVO DE CASOS SEMANALES ACUMULADOS X BARRIO Y COMUNA.
+  
+  output$casos3=renderPlotly({
+    plot_ly(data=df_COVID %>% 
+          count(SEMANA,COMUNA,BARRIO,CASOS) %>% 
+          filter(COMUNA %in% c(input$comuna)), 
+        x=~CASOS,
+        y=~COMUNA,
+        color=~BARRIO,
+        frame=~SEMANA,
+        text=~BARRIO,
+        hoverinfo='text',
+        type='bar',
+        mode='markers') %>% 
+      layout(yaxis=list(title=''))
+  })
+  
+#GRAFICO DE PROPORCION DE FALLECIDOS Y NO FALLECIDOS POR COMUNA
+  
+ output$comunafalle=renderPlotly({
+    ggplotly(ggplot(data= df_CABA %>% 
+                      filter(provincia == 'CABA',
+                             sexo %in% c('F','M'),
+                             comuna == input$comufalle)%>% 
+                      count(provincia,sexo,edad,fallecido) %>% 
+                      mutate(rango=case_when(edad %in% c(0:15) ~ '0 a 15 años',
+                           edad %in% c(16:30) ~ '16 a 30 años',
+                           edad %in% c(31:45) ~ '31 a 45 años',
+                           edad %in% c(46:50) ~ '46 a 50 años',
+                           edad %in% c(51:65) ~ '51 a 65 años',
+                           edad %in% c(66:80) ~ '66 a 80 años',
+                           TRUE ~ 'más de 80 años'),
+                           cantidad=n),
+  aes(x=sexo,y=cantidad,fill=rango,sep=edad))+
+    geom_col(position='fill')+
+    facet_grid(fallecido~.)+
+    coord_flip()+
+    theme_bw()+
+    labs(title='Relación entre edad y fallecimiento por comuna',
+       y='',
+       x='',
+     fill='Rango etario'))
+  })
+  
+  #TEXTO
+  
+output$texto=renderText({
+ 
+  if (input$rank=='Demografía'){
+    print('Considera un promedio de los puntajes de la densidad poblacional (relación entre población y superficie) y de la proporción de la población de riesgo (mayor de 60 años) de cada comuna.  Mientras más se acerca a rojo la comuna, mayor es la densidad poblacional y la población resulta más envejecida.')
+  }
+  else if (input$rank=='Salud'){
+    print('Considera un promedio de los puntajes de metros cuadrados de espacios verdes por habitante y la cantidad de personas con prepaga por comuna. Mientras más se acerca a rojo la comuna, menor es la cantidad de espacios verdes por habitante y mayor es la dependencia del sistema de salud público.')
+   
+  }
+  else if (input$rank=='Empleo'){
+    print('Considera un promedio de los puntajes de la proporción de trabajadores esenciales e impedidos de hacer teletrabajo y la proporción de trabajadores informales de cada comuna. Mientras más se acerca a rojo la comuna, mayor es la proporción de estos trabajadores.')
+  }
+  else if (input$rank=='Cercanía'){
+    print('Considera los puntajes que refieren a la cercanía media de las viviendas a comercios esenciales de cada comuna. Mientras más se acerca a rojo la comuna, mayor es la distancia media a estos comercios.')
+ 
+  }
+  else if (input$rank=='Vivienda'){
+    print('Considera un promedio de los puntajes de la proporción de viviendas unipersonales, precarias y que presentan hacinamiento crítico. Mientras más se acerca a rojo la comuna, menor es la cantidad de viviendas unipersonales y mayor es el hacinamiento y la precariedad.')
+  }
+ else {}
+ 
+ 
+})
+
+#TABLA
+
+output$tabla_rank=renderTable({
+ 
+  if (input$rank=='Demografía'){
+    st_geometry(puntajes) = NULL
+    
+    puntajes %>%  select(COMUNAS,Demografía) %>% top_n(6,Demografía) %>% arrange(desc(Demografía)) %>% select(COMUNAS)
+  }
+  else if (input$rank=='Salud'){
+    st_geometry(puntajes) = NULL
+    
+    puntajes %>%  select(COMUNAS,Salud) %>% top_n(6,Salud) %>% arrange(desc(Salud)) %>% select(COMUNAS)
+   
+  }
+  else if (input$rank=='Empleo'){
+    st_geometry(puntajes) = NULL
+    
+    puntajes %>%  select(COMUNAS,Empleo) %>% top_n(6,Empleo) %>% arrange(desc(Empleo)) %>% select(COMUNAS)
+  }
+  else if (input$rank=='Cercanía'){
+    st_geometry(puntajes) = NULL
+    
+    puntajes %>%  select(COMUNAS,Cercanía) %>% top_n(6,Cercanía) %>% arrange(desc(Cercanía)) %>% select(COMUNAS)
+  }
+  else if (input$rank=='Vivienda'){
+    st_geometry(puntajes) = NULL
+    
+    puntajes %>%  select(COMUNAS,Vivienda) %>% top_n(6,Vivienda) %>% arrange(desc(Vivienda)) %>% select(COMUNAS)
+  }
+ else {}
+ 
+ 
+})
+
+
+  
+#MAPAS
+  
+output$mapas=renderLeaflet({
+  if (input$rank=='Demografía'){
+    
+  leaflet(puntajes) %>% addProviderTiles("CartoDB") %>% 
+    addPolygons(color = "#444444", 
+    weight = 1, smoothFactor = 0.5, opacity = 1, fillOpacity = 0.5, fillColor = ~palnumericD(puntajes$Demografía), 
+    group = "Demografía", highlightOptions = highlightOptions(color = "white", 
+        weight = 2, bringToFront = TRUE), label = ~puntajes$COMUNAS, labelOptions = labelOptions(direction = "auto"), 
+    popup = popup) %>% 
+      addLegend(position = "topright", pal = palnumericD, values = ~puntajes$Demografía, 
+    title = "Puntaje")
+  }
+  
+  else if (input$rank=='Salud'){
+    
+  leaflet(puntajes) %>% addProviderTiles("CartoDB") %>% 
+    addPolygons(color = "#444444", 
+    weight = 1, smoothFactor = 0.5, opacity = 1, fillOpacity = 0.5, fillColor = ~palnumericS(puntajes$Salud), 
+    group = "Salud", highlightOptions = highlightOptions(color = "white", 
+        weight = 2, bringToFront = TRUE), label = ~puntajes$COMUNAS, labelOptions = labelOptions(direction = "auto"), 
+    popup = popup) %>% 
+      addLegend(position = "topright", pal = palnumericS, values = ~puntajes$Salud, 
+    title = "Puntaje")
+  }
+  
+  else if (input$rank=='Empleo'){
+    
+    leaflet(puntajes) %>% addProviderTiles("CartoDB") %>% 
+      addPolygons(data = puntajes, color = "#444444", weight = 1, smoothFactor = 0.5, 
+    opacity = 1, fillOpacity = 0.5, fillColor = ~palnumericE(puntajes$Empleo), 
+    group = "Empleo", highlightOptions = highlightOptions(color = "white", 
+        weight = 2, bringToFront = TRUE), label = ~puntajes$COMUNAS, labelOptions = labelOptions(direction = "auto"), 
+    popup = popup) %>% 
+      addLegend(position = "topright", pal = palnumericE, values = ~puntajes$Empleo, 
+    title = "Puntaje")
+  }
+  
+  else if (input$rank=='Cercanía'){
+    
+    leaflet(puntajes) %>% addProviderTiles("CartoDB") %>% 
+      addPolygons(data = puntajes, color = "#444444", weight = 1, smoothFactor = 0.5, 
+    opacity = 1, fillOpacity = 0.5, fillColor = ~palnumericE(puntajes$Cercanía), group = "Cercanía", 
+    highlightOptions = highlightOptions(color = "white", weight = 2, bringToFront = TRUE), 
+    label = ~puntajes$COMUNAS, labelOptions = labelOptions(direction = "auto"), 
+    popup = popup) %>% 
+      addLegend(position = "topright", pal = palnumericC, values = ~puntajes$Cercanía, 
+    title = "Puntaje")
+  }
+  
+  else if (input$rank=='Vivienda'){
+    
+    leaflet(puntajes) %>% addProviderTiles("CartoDB") %>% 
+      addPolygons(data = puntajes, color = "#444444", weight = 1, smoothFactor = 0.5, 
+    opacity = 1, fillOpacity = 0.5, fillColor = ~palnumericE(puntajes$Vivienda), group = "Vivienda", 
+    highlightOptions = highlightOptions(color = "white", weight = 2, bringToFront = TRUE), 
+    label = ~puntajes$COMUNAS, labelOptions = labelOptions(direction = "auto"), 
+    popup = popup) %>% 
+      addLegend(position = "topright", pal = palnumericV, values = ~puntajes$Vivienda, 
+    title = "Puntaje")
+  }
+
+  
+  
+  
+  })
+  
+  
+  
+  #TABLA PUNTAJES
+  
+  output$puntajes=renderDataTable({
+    
+    st_geometry(puntajes)=NULL
+    
+    puntajes %>%  select(COMUNAS,Total,Empleo,Vivienda,Cercanía,Salud,Demografía)
+  })
+  
+#CONCLUSIONES
+ 
+ 
+  output$mapacon1=renderLeaflet({
+        leaflet(CASOS100) %>% addProviderTiles("CartoDB") %>% 
+      addPolygons(data = CASOS100, color = "#444444", weight = 1, smoothFactor = 0.5, 
+    opacity = 1, fillOpacity = 0.5, fillColor = ~palnumeric100(CASOS100$casos100), group = "Casos", 
+    highlightOptions = highlightOptions(color = "white", weight = 2, bringToFront = TRUE), 
+    label = ~CASOS100$casos100, labelOptions = labelOptions(direction = "auto"), 
+    popup = popup) %>% 
+      addLegend(position = "topright", pal = palnumeric100, values = ~CASOS100$casos100, 
+    title = "Casos c/100 mil hab.")
+   
+  })
+ 
+  output$mapacon2=renderLeaflet({
+    leaflet(puntajes) %>% addProviderTiles("CartoDB") %>% 
+      addPolygons(data = puntajes, color = "#444444", weight = 1, smoothFactor = 0.5, 
+    opacity = 1, fillOpacity = 0.5, fillColor = ~palnumericTotal(puntajes$Total), group = "Casos", 
+    highlightOptions = highlightOptions(color = "white", weight = 2, bringToFront = TRUE), 
+    label = ~puntajes$Total, labelOptions = labelOptions(direction = "auto"), 
+    popup = popup) %>% 
+      addLegend(position = "topright", pal = palnumericTotal, values = ~puntajes$Total, 
+    title = "Puntaje total")
+   
+  })
+ 
+ 
+  output$tablacon2=renderTable({
+    st_geometry(puntajes)=NULL
+   
+  puntajes %>%
+      top_n(5,Total) %>%
+      arrange(desc(Total)) %>%
+      select(COMUNAS,BARRIOS,Total)
+ 
+  })
+
+  output$tablacon1=renderTable({
+    st_geometry(CASOS100)=NULL
+    
+    CASOS100 %>%
+      top_n(6,casos100) %>%
+      arrange(desc(casos100)) %>%
+      mutate(COMUNAS=COMUNA) %>% 
+      select(COMUNAS,BARRIOS,casos100)
+})
+
+
+}
+
+
+shinyApp(ui=ui,server=server)
+```
+
